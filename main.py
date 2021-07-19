@@ -1,27 +1,27 @@
 import json
+import os
 import time
 import requests
 from progress.bar import IncrementalBar
 
 
 class VkLoader:
-    def __init__(self, token, version=5.131):
+    def __init__(self, token):
         self.token = token
-        self.v = version
 
-    def get_photos(self, owner_id, album='profile', count=5):
+    def get_photos(self, owner_id, album='profile', count=5, version=5.131):
         """Valid values for the parameter 'album' are 'profile', 'wall', 'saved'"""
         url = 'https://api.vk.com/method/photos.get'
         params = {
-                  'access_token': self.token, 'v': self.v, 'owner_id': owner_id,
+                  'access_token': self.token, 'v': version, 'owner_id': owner_id,
                   'album_id': album, 'extended': 1, 'count': count
                  }
         response = requests.get(url, params)
-        return response.json()
+        return response.json() if response.ok else response.status_code
 
-    def upload_dict(self, owner_id, album='profile', count=5):
+    def upload_dict(self, response_d):
         result = {}
-        response = self.get_photos(owner_id, album, count)
+        response = response_d
         for i in response['response']['items']:
             sizes = sorted(i['sizes'], key=lambda size: size['height'] + size['width'])
             if i['likes']['count'] in result:
@@ -36,10 +36,12 @@ class YaUploader:
     def __init__(self, token):
         self.token = token
 
+    def get_headers(self):
+        return {'Authorization': f'OAuth {self.token}'}
+
     def create_catalog(self, catalog_name='Uploaded files'):
         url = 'https://cloud-api.yandex.net/v1/disk/resources'
-        headers = {'Authorization': f'OAuth {self.token}'}
-        response = requests.put(url, headers=headers, params={'path': catalog_name})
+        response = requests.put(url, headers=self.get_headers(), params={'path': catalog_name})
         return response.status_code
 
     def upload_photos(self, upload_dict, catalog_name='Uploaded files'):
@@ -47,10 +49,9 @@ class YaUploader:
         result = []
         self.create_catalog(catalog_name)
         url = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
-        headers = {'Authorization': f'OAuth {self.token}'}
         for k, v in upload_dict.items():
             params = {'path': f'{catalog_name}/{k}.jpg', 'url': v[0]}
-            requests.post(url=url, headers=headers, params=params)
+            requests.post(url=url, headers=self.get_headers(), params=params)
             result.append({'file_name': f"{k}.jpg", 'size': v[1]})
             bar.next()
         bar.finish()
@@ -60,7 +61,8 @@ class YaUploader:
 
 
 if __name__ == '__main__':
-    vk_instance = VkLoader('ВК токен')
-    vk_upload_dict = vk_instance.upload_dict('чей-нибудь id')
-    ya_instance = YaUploader('Яндекс токен')
+    vk_instance = VkLoader(os.getenv('VK_TOKEN'))
+    response_dict = vk_instance.get_photos('VK_ID')
+    vk_upload_dict = vk_instance.upload_dict(response_dict)
+    ya_instance = YaUploader(os.getenv('YA_TOKEN'))
     ya_instance.upload_photos(vk_upload_dict)
